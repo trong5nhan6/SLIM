@@ -32,9 +32,11 @@ import math
 import torch
 import torch.nn as nn
 
+from ultralytics.nn.modules.block import C2f
+from ultralytics.nn.modules.conv import Conv, RepConv
 from ultralytics.nn.modules.head import Detect
 
-__all__ = ["ConvGN", "Scale", "LSCDetect"]
+__all__ = ["ConvGN", "Scale", "LSCDetect", "LSCDetectBN", "RepBottleneck", "C3k2Rep"]
 
 
 class ConvGN(nn.Module):
@@ -111,3 +113,64 @@ class LSCDetect(Detect):
         s = float(self.stride.prod() ** (1.0 / self.nl))  # geometric mean stride
         self.cv2.bias.data[:] = 1.0  # box
         self.cv3.bias.data[: self.nc] = math.log(5 / self.nc / (640 / s) ** 2)  # cls prior
+
+
+class LSCDetectBN(LSCDetect):
+    """Fuse-able variant of LSCDetect (idea "slim", ablation B1).
+
+    Identical shared-conv structure to LSCDetect, but every ConvGN is replaced by the stock
+    ultralytics `Conv` (Conv2d + BatchNorm + SiLU). Motivation: GroupNorm cannot be folded
+    into its preceding conv, so LSCDetect keeps 3 separate kernels (conv, GN, act) at EVERY
+    detect scale at inference; the P2 scale pays that at 4x resolution. A BN head fuses via
+    DetectionModel.fuse() (fuse_conv_and_bn), collapsing each conv+bn into a single kernel,
+    which is where slim's real (non-FLOP) latency hides.
+
+    Trade-off measured by a real run, not assumed: the shared 3x3 stack now carries ONE
+    BatchNorm seen by all scales sequentially, so its running stats are averaged across P2/
+    P3/P4 (this is exactly why GN was chosen — batch=8 makes per-scale BN noisy). The
+    per-scale align convs + learnable Scale absorb part of that. If mAP drops materially,
+    the fallback is shared conv weights with per-scale BN (fuses to nl separate convs).
+
+    forward()/bias_init() are inherited from LSCDetect unchanged (they only reference
+    self.conv / self.share_conv / self.cv2 / self.cv3 / self.scale).
+    """
+
+    def __init__(self, nc: int = 80, hidc: int = 64, ch: tuple = ()):
+        Detect.__init__(self, nc, ch)  # skip LSCDetect.__init__ (it builds ConvGN)
+        assert not self.end2end, "LSCDetectBN does not implement the end2end (v10) path"
+        self.conv = nn.ModuleList(Conv(x, hidc, 1) for x in ch)  # per-scale align (fuse-able)
+        self.share_conv = nn.Sequential(Conv(hidc, hidc, 3), Conv(hidc, hidc, 3, g=hidc))
+        self.cv2 = nn.Conv2d(hidc, 4 * self.reg_max, 1)
+        self.cv3 = nn.Conv2d(hidc, self.nc, 1)
+        self.scale = nn.ModuleList(Scale(1.0) for _ in ch)
+
+
+class RepBottleneck(nn.Module):
+    """Two RepConv 3x3s with an optional residual (idea "slim", ablation B2).
+
+    RepConv trains as a multi-branch (3x3 + 1x1) block and reparameterizes to a single dense
+    3x3 conv at inference (RepConv.fuse_convs, triggered by DetectionModel.fuse()). This
+    trades GhostBottleneck's low-FLOP-but-memory-bound blocks for dense convs that keep the
+    GPU busy — higher FLOPs on paper, but lower wall-clock latency at batch=1, which is the
+    slim latency problem. `c3k`-style depth stays at the C2f level.
+    """
+
+    def __init__(self, c: int, shortcut: bool = True):
+        super().__init__()
+        self.cv1 = RepConv(c, c, 3)
+        self.cv2 = RepConv(c, c, 3)
+        self.add = shortcut
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = self.cv2(self.cv1(x))
+        return x + y if self.add else y
+
+
+class C3k2Rep(C2f):
+    """C3k2 with RepBottleneck inner blocks — drop-in for C3k2Ghost (same YAML signature
+    C3k2(c1, c2, n, c3k, e, g, shortcut); `c3k` accepted but ignored, Rep blocks always used).
+    """
+
+    def __init__(self, c1, c2, n=1, c3k=False, e=0.5, g=1, shortcut=True):
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.m = nn.ModuleList(RepBottleneck(self.c, shortcut) for _ in range(n))

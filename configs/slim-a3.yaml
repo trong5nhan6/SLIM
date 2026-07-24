@@ -1,0 +1,22 @@
+# Idea slim — A3 ablation: small-object-focused loss tuning (architecture UNCHANGED, so
+# params/GFLOPs are identical to the slim baseline; only the CIoU/NWD blend moves).
+#
+# Two principled changes vs configs/slim.yaml (which uses the defaults 0.5 / 12.8):
+#   1. nwd_constant 12.8 -> 4.0. models/lwso/losses.py notes C=12.8 is the paper value for
+#      ABSOLUTE-pixel boxes, but inside v8DetectionLoss the boxes are stride-normalized
+#      (feature-map units), so effective object sizes are far smaller and 12.8 makes the
+#      NWD similarity saturate near 1 (little gradient). A smaller C (paper-suggested 2-16
+#      range, base.yaml suggests ablating {2,4,8,12.8}) sharpens the tiny-object signal.
+#   2. nwd_ratio 0.5 -> 0.3. Shift weight toward the NWD term (0.3 CIoU / 0.7 NWD) because
+#      VisDrone is dominated by few-pixel objects (pedestrian/people/bicycle) where IoU
+#      gradients are unstable and NWD is the better-behaved regressor.
+#
+# Everything else (model_cfg, recipe) matches slim so this isolates the loss variable.
+# Run via: python train.py --config configs/slim-a3.yaml
+
+idea: slim
+model_cfg: cfg/slim-yolo11n.yaml
+use_nwd: true
+nwd_ratio: 0.3 # 0.3 CIoU / 0.7 NWD (was 0.5/0.5)
+nwd_constant: 4.0 # was 12.8 — smaller C suits stride-normalized boxes
+name: slim-a3

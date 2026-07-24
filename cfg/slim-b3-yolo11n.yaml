@@ -1,0 +1,48 @@
+# SLIM-B3 — latency ablation: slim-yolo11n.yaml with the EMA attention block REMOVED.
+#
+# Rationale (see the latency analysis): EMA (Efficient Multi-scale Attention) is the most
+# expensive attention op in slim's backbone — it runs grouped matmuls + softmax over the
+# full P3 feature map (memory-bound, poor GPU utilisation), so it costs real wall-clock
+# latency despite negligible FLOPs. ECA (layer "16" here) is kept: it is a single conv1d
+# over pooled channels (near-zero cost) and sits on the P2 output where small objects live.
+# C2PSA is also kept (isolated ablation: change exactly ONE thing vs slim).
+#
+# This is the ONLY change vs cfg/slim-yolo11n.yaml. Every index below is re-numbered after
+# deleting EMA; the P3 skip that used to point at the EMA output (layer 5) now points at the
+# C3k2Ghost that fed it (layer 4). Run via: python train.py --config configs/slim-b3.yaml
+
+nc: 10 # VisDrone classes
+
+scales: # [depth, width, max_channels]
+  n: [1.00, 1.00, 1024]
+
+backbone:
+  # [from, repeats, module, args]                    (shapes @ 960x960 input, n scale)
+  - [-1, 1, Conv, [16, 3, 2]] # 0  P1/2   16x480x480
+  - [-1, 1, SPDConvGroup, [32]] # 1  P2/4   32x240x240
+  - [-1, 2, C3k2Ghost, [64, False, 0.25]] # 2         64x240x240
+  - [-1, 1, SPDConvGroup, [64]] # 3  P3/8   64x120x120
+  - [-1, 2, C3k2Ghost, [128, False, 0.25]] # 4        128x120x120  (P3 skip source; EMA removed)
+  - [-1, 1, SPDConvGroup, [128]] # 5  P4/16  128x60x60
+  - [-1, 2, C3k2Ghost, [128, True]] # 6               128x60x60
+  - [-1, 1, SPPF, [128, 5]] # 7               128x60x60
+  - [-1, 1, C2PSA, [128]] # 8               128x60x60  (P4 skip source)
+
+head:
+  # top-down
+  - [-1, 1, DySample, [128, 2]] # 9  P4 -> P3 size
+  - [[-1, 4], 1, BiFPNCat, [2]] # 10 128+128=256   (was [[-1,5]]; EMA output folded into layer 4)
+  - [-1, 1, C3k2Ghost, [96, False]] # 11 P3 intermediate
+  - [-1, 1, DySample, [96, 2]] # 12 P3 -> P2 size
+  - [[-1, 2], 1, BiFPNCat, [2]] # 13 96+64=160
+  - [-1, 1, C3k2Ghost, [48, False]] # 14 P2/4 out
+  - [-1, 1, ECA, [48]] # 15 cheap channel attention on P2 (KEPT — near-zero cost)
+  # bottom-up
+  - [-1, 1, SPDConvGroup, [96]] # 16 P2 -> P3 size
+  - [[-1, 11], 1, BiFPNCat, [2]] # 17 96+96=192
+  - [-1, 1, C3k2Ghost, [96, False]] # 18 P3/8 out
+  - [-1, 1, SPDConvGroup, [128]] # 19 P3 -> P4 size
+  - [[-1, 8], 1, BiFPNCat, [2]] # 20 128+128=256
+  - [-1, 1, C3k2Ghost, [128, True]] # 21 P4/16 out
+
+  - [[15, 18, 21], 1, LSCDetect, [nc, 48]] # 22 shared-conv GN head (P2, P3, P4), hidc=48

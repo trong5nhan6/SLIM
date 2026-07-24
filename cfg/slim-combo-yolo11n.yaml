@@ -1,0 +1,46 @@
+# SLIM-COMBO — combined variant stacking four budget-safe improvements on slim-yolo11n.yaml:
+#   A2: P4 neck thickened 128 -> 144 (layers 19 & 21) — capacity where latency is cheap.
+#   B1: LSCDetect head -> LSCDetectBN (Conv+BN, fuse-able) — kills the un-fusable GN head tax.
+#   B3: EMA attention removed (was backbone layer 5) — drops a memory-bound op; ECA + C2PSA kept.
+#   A3: (loss, not architecture) lives in configs/slim-combo.yaml — NWD C=4.0, ratio=0.3.
+#
+# The graph below is slim re-indexed after deleting EMA (so the P3 skip that pointed at the
+# EMA output now points at the C3k2Ghost that fed it, layer 4). B2 (Ghost->RepConv) is
+# deliberately excluded — it blew the <6.3 GFLOPs budget (9.8G).
+# Run via: python train.py --config configs/slim-combo.yaml
+
+nc: 10 # VisDrone classes
+
+scales: # [depth, width, max_channels]
+  n: [1.00, 1.00, 1024]
+
+backbone:
+  # [from, repeats, module, args]                    (shapes @ 960x960 input, n scale)
+  - [-1, 1, Conv, [16, 3, 2]] # 0  P1/2   16x480x480
+  - [-1, 1, SPDConvGroup, [32]] # 1  P2/4   32x240x240
+  - [-1, 2, C3k2Ghost, [64, False, 0.25]] # 2         64x240x240
+  - [-1, 1, SPDConvGroup, [64]] # 3  P3/8   64x120x120
+  - [-1, 2, C3k2Ghost, [128, False, 0.25]] # 4        128x120x120  (P3 skip source; EMA removed)
+  - [-1, 1, SPDConvGroup, [128]] # 5  P4/16  128x60x60
+  - [-1, 2, C3k2Ghost, [128, True]] # 6               128x60x60
+  - [-1, 1, SPPF, [128, 5]] # 7               128x60x60
+  - [-1, 1, C2PSA, [128]] # 8               128x60x60  (P4 skip source)
+
+head:
+  # top-down
+  - [-1, 1, DySample, [128, 2]] # 9  P4 -> P3 size
+  - [[-1, 4], 1, BiFPNCat, [2]] # 10 128+128=256   (P3 skip = layer 4, EMA folded in)
+  - [-1, 1, C3k2Ghost, [96, False]] # 11 P3 intermediate
+  - [-1, 1, DySample, [96, 2]] # 12 P3 -> P2 size
+  - [[-1, 2], 1, BiFPNCat, [2]] # 13 96+64=160
+  - [-1, 1, C3k2Ghost, [48, False]] # 14 P2/4 out (kept thin — protects latency)
+  - [-1, 1, ECA, [48]] # 15 cheap channel attention on P2 (small-object features)
+  # bottom-up
+  - [-1, 1, SPDConvGroup, [96]] # 16 P2 -> P3 size
+  - [[-1, 11], 1, BiFPNCat, [2]] # 17 96+96=192
+  - [-1, 1, C3k2Ghost, [96, False]] # 18 P3/8 out
+  - [-1, 1, SPDConvGroup, [144]] # 19 P3 -> P4 size          (128 -> 144) <-- A2
+  - [[-1, 8], 1, BiFPNCat, [2]] # 20 144+128=272
+  - [-1, 1, C3k2Ghost, [144, True]] # 21 P4/16 out           (128 -> 144) <-- A2
+
+  - [[15, 18, 21], 1, LSCDetectBN, [nc, 48]] # 22 fuse-able BN head (P2, P3, P4), hidc=48 <-- B1

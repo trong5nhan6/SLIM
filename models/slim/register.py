@@ -27,7 +27,7 @@ import ultralytics.nn.tasks as tasks
 from models._patch_utils import get_current_parse_model_source, save_parse_model_source
 from models.lwso.register import register_lwso
 
-from .modules import LSCDetect
+from .modules import C3k2Rep, LSCDetect, LSCDetectBN
 
 _registered = False
 
@@ -40,19 +40,35 @@ def register_slim() -> None:
 
     register_lwso()  # SPDConvGroup/C3k2Ghost/EMA/ECA/DySample/BiFPNCat, reused unchanged
 
-    setattr(tasks, LSCDetect.__name__, LSCDetect)
+    for cls in (LSCDetect, LSCDetectBN, C3k2Rep):
+        setattr(tasks, cls.__name__, cls)
 
     src = get_current_parse_model_source(tasks)
     substitutions = [
         # 1. head frozenset: parse_model appends [ch[x] for x in f] for these classes
         (
             r"\{Detect, WorldDetect,",
-            "{LSCDetect, Detect, WorldDetect,",
+            "{LSCDetect, LSCDetectBN, Detect, WorldDetect,",
         ),
         # 2. legacy-flag set: m.legacy = legacy stamped on Detect-family classes
         (
             r"if m in \{Detect, YOLOEDetect,",
-            "if m in {LSCDetect, Detect, YOLOEDetect,",
+            "if m in {LSCDetect, LSCDetectBN, Detect, YOLOEDetect,",
+        ),
+        # 3. C3k2Rep (ablation B2) infers channels like C3k2Ghost — add to both the
+        #    channel-inference set and the repeat set. These patch the source already
+        #    rewritten by register_lwso() (which inserted C3k2Ghost just above EMA in
+        #    base_modules and just after '{' in repeat_modules). We deliberately do NOT
+        #    touch the `if m is C3k2 or m is C3k2Ghost:` c3k-flag line: it only sets
+        #    c3k=True on m/l/x scales (slim is n-scale) and C3k2Rep ignores c3k anyway,
+        #    and editing it would clash with register_star's exact-match on that same line.
+        (
+            r"C3k2Ghost,\n            EMA,",
+            "C3k2Ghost,\n            C3k2Rep,\n            EMA,",
+        ),
+        (
+            r"\{\n            C3k2Ghost,",
+            "{\n            C3k2Rep,\n            C3k2Ghost,",
         ),
     ]
     for pattern, replacement in substitutions:

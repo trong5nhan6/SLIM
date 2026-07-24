@@ -1,0 +1,7 @@
+# Idea slim — A2 ablation: capacity rebalanced toward P3/P4 (cheap latency), P2 kept thin.
+# Same slim recipe (NWD blend); only the model cfg differs. See cfg/slim-a2-yolo11n.yaml.
+# Measured @640: 0.582M params / 6.38 GFLOPs. Run: python train.py --config configs/slim-a2.yaml
+idea: slim
+model_cfg: cfg/slim-a2-yolo11n.yaml
+use_nwd: true
+name: slim-a2
