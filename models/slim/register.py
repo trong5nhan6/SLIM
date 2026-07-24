@@ -55,20 +55,25 @@ def register_slim() -> None:
             r"if m in \{Detect, YOLOEDetect,",
             "if m in {LSCDetect, LSCDetectBN, Detect, YOLOEDetect,",
         ),
-        # 3. C3k2Rep (ablation B2) infers channels like C3k2Ghost — add to both the
-        #    channel-inference set and the repeat set. These patch the source already
-        #    rewritten by register_lwso() (which inserted C3k2Ghost just above EMA in
-        #    base_modules and just after '{' in repeat_modules). We deliberately do NOT
-        #    touch the `if m is C3k2 or m is C3k2Ghost:` c3k-flag line: it only sets
-        #    c3k=True on m/l/x scales (slim is n-scale) and C3k2Rep ignores c3k anyway,
+        # 3. C3k2Rep (ablation B2) infers channels like C3k2Ghost — add to the
+        #    channel-inference set and the repeat set. Anchor on the `frozenset(...{`
+        #    opening brace (same anchor register_lwso/register_fap/register_star use) and
+        #    prepend right after it, so this COMPOSES regardless of which register_*() ran
+        #    first: in the DDP subprocess the order is lwso->fap->star->slim (see
+        #    _patch_utils.patch_ddp_registration), and star inserts its own modules just
+        #    after that same brace, so any anchor that assumes a specific neighbour (e.g.
+        #    "{ immediately followed by C3k2Ghost") breaks. Prepending after the brace does
+        #    not. We deliberately do NOT touch the `if m is C3k2 or m is C3k2Ghost:` line:
+        #    it only sets c3k=True on m/l/x scales (slim is n-scale), C3k2Rep ignores c3k,
         #    and editing it would clash with register_star's exact-match on that same line.
         (
-            r"C3k2Ghost,\n            EMA,",
-            "C3k2Ghost,\n            C3k2Rep,\n            EMA,",
+            r"base_modules = frozenset\(\s*\{",
+            "base_modules = frozenset(\n        {\n            C3k2Rep,",
         ),
         (
-            r"\{\n            C3k2Ghost,",
-            "{\n            C3k2Rep,\n            C3k2Ghost,",
+            r"repeat_modules = frozenset\([^\{]*\{",
+            "repeat_modules = frozenset(  # modules with 'repeat' arguments\n        {\n"
+            "            C3k2Rep,",
         ),
     ]
     for pattern, replacement in substitutions:
