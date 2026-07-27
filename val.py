@@ -11,8 +11,8 @@ comma-separated PAPER TABLE ROW to paste straight into a spreadsheet. Precision/
 and the train-time settings used to live only in ultralytics' own printout and in the
 checkpoint respectively, which meant transcribing them by hand for every run.
 
-    python val.py --weights runs/detect/lwso-n/weights/best.pt --split val
-    python val.py --weights runs/detect/lwso-n/weights/best.pt --split test --imgsz 960
+    python val.py --weights runs/detect/exp04/weights/best.pt --split val
+    python val.py --weights runs/detect/exp04/weights/best.pt --split test
 """
 
 import argparse
@@ -47,7 +47,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--weights", required=True)
     ap.add_argument("--data", default=str(ROOT / "data" / "visdrone.yaml"))
-    ap.add_argument("--imgsz", type=int, default=960)
+    ap.add_argument("--imgsz", type=int, default=640,
+                     help="phải khớp imgsz lúc train (mặc định 640 = imgsz của mọi dòng "
+                          "trong results/SOTA-SLIM.xlsx); lệch thì GFLOPs/latency vô nghĩa")
     ap.add_argument("--split", default="val", choices=["val", "test"])
     ap.add_argument("--batch", type=int, default=8)
     ap.add_argument("--device", default=None)

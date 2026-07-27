@@ -13,11 +13,12 @@ weights: null # optional .pt để warm-start một model .yaml (model.load())
 
 # ── Dataset ──────────────────────────────────────────────────────────────────
 data: data/visdrone.yaml
-imgsz: 960
+imgsz: 640 # mọi dòng trong results/SOTA-SLIM.xlsx đo ở 640 — đổi là cả bảng hết so được
 
 # ── Training Hyperparameters ─────────────────────────────────────────────────
 epochs: 50
-batch: 8 # P2 head @960 tốn VRAM; 8 fits ~12GB, tăng nếu còn dư
+batch: 8 # thủ ở mức an toàn; @640 head P2 nhẹ hơn nhiều — các run trong bảng dùng 16/32
+         # (notebook Kaggle truyền --batch riêng). Đổi batch là đổi recipe: giữ khớp giữa các dòng.
 device: null # null = ultralytics auto-detect; hoặc "0", "0,1", "cpu"
 multi_scale: false # tốn thêm VRAM
 close_mosaic: 15

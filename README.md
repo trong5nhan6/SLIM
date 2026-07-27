@@ -86,15 +86,16 @@ python train.py --config configs/exp02.yaml
 python train.py --config configs/exp04.yaml --imgsz 640 --batch 16
 
 # Đánh giá — in đủ 10 metric của bảng + 1 dòng CSV dán thẳng vào Excel:
-python val.py --weights runs/detect/exp04/weights/best.pt --split val --imgsz 640
+python val.py --weights runs/detect/exp04/weights/best.pt --split val
 ```
 
 `val.py` in ra: RUN INFO (epochs/imgsz/batch/seed đọc từ `train_args` trong checkpoint),
 P/R/mAP50/mAP50-95, khối EFFICIENCY METRICS (params, GFLOPs, model size **fp32 lý thuyết**
 và **dung lượng file `.pt` thật**, latency, FPS), rồi khối `PAPER TABLE ROW`.
 
-⚠️ `--imgsz` mặc định của `val.py` là **960**; bảng dùng **640**. Quên flag là số efficiency
-sai lệch lớn — `val.py` sẽ cảnh báo nếu imgsz eval khác imgsz lúc train.
+`--imgsz` mặc định là **640** ở cả `configs/base.yaml` lẫn `val.py` — đúng imgsz của mọi dòng
+trong bảng, nên không cần truyền tay. Nếu vẫn lỡ eval ở size khác size lúc train, `val.py`
+cảnh báo ngay (GFLOPs và latency đều phụ thuộc bậc hai vào imgsz).
 
 ## Cấu hình train (`configs/` + `models/`)
 

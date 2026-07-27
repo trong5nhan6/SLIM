@@ -100,7 +100,8 @@ def main():
     ap.add_argument("--imgsz", type=int, default=None)
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--batch", type=int, default=None,
-                     help="P2 head @960 is VRAM-hungry; 8 fits ~12GB, raise if you can")
+                     help="the P2 head is VRAM-hungry (much more so above 640); the runs in "
+                          "results/SOTA-SLIM.xlsx used 16/32 -- keep it equal across rows")
     ap.add_argument("--device", default=None, help="e.g. 0 or 0,1 or cpu")
     ap.add_argument("--name", default=None, help="run name under runs/detect/")
     ap.add_argument("--weights", default=None, help="optional .pt to warm-start a .yaml model")
