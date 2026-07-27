@@ -1,0 +1,6 @@
+# EXP16 — EXP04 minus SPDConv (stride-2 Conv instead)
+# Table 4, row 16. 1.063M / 10.26G — removing SPDConv makes the model MORE expensive, so this row can win on both axes.
+idea: slim
+model_cfg: cfg/exp16-nospd-yolo11n.yaml
+use_nwd: true
+name: exp16

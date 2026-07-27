@@ -1,0 +1,50 @@
+# EXP15 (Table 4, row 15) — EXP04 with every attention block removed.
+#
+# Drops all three at once: EMA (backbone P3 feature), C2PSA (after SPPF), ECA (on the P2
+# output). Removing them shifts every downstream index, so the whole graph is re-numbered.
+#
+# Measured (build + fuse, imgsz 640): 0.827M / 8.77 GFLOPs vs EXP04's 0.893M / 9.23G --
+# the three blocks together are only 7% of params and 5% of compute. The question this row
+# answers is whether that 5% buys anything.
+#
+# DELIBERATELY GROUPED: all three go at once to spend one training run instead of three.
+# The caption must therefore say "all attention removed" -- this row cannot support a
+# claim about EMA or ECA or C2PSA individually. For reference, an earlier run that dropped
+# only EMA (on the Ghost-based EXP01 architecture) moved mAP50 by -0.68 points, which is
+# inside single-run noise, so a large effect here is not expected.
+#
+# Run: python train.py --config configs/exp15.yaml
+
+nc: 10 # VisDrone classes
+
+scales: # [depth, width, max_channels]
+  n: [1.00, 1.00, 1024]
+
+backbone:
+  # [from, repeats, module, args]                    (shapes @ 960x960 input, n scale)
+  - [-1, 1, Conv, [16, 3, 2]] # 0  P1/2   16x480x480
+  - [-1, 1, SPDConvGroup, [32]] # 1  P2/4   32x240x240
+  - [-1, 2, C3k2Rep, [64, False, 0.25]] # 2         64x240x240
+  - [-1, 1, SPDConvGroup, [64]] # 3  P3/8   64x120x120
+  - [-1, 2, C3k2Rep, [128, False, 0.25]] # 4        128x120x120   (EMA dropped after this)
+  - [-1, 1, SPDConvGroup, [128]] # 5  P4/16  128x60x60
+  - [-1, 2, C3k2Rep, [128, True]] # 6               128x60x60
+  - [-1, 1, SPPF, [128, 5]] # 7               128x60x60   (C2PSA dropped after this)
+
+head:
+  # top-down
+  - [-1, 1, nn.Upsample, [None, 2, "bilinear"]] # 8  P4 -> P3 size
+  - [[-1, 4], 1, BiFPNCat, [2]] # 9  128+128=256
+  - [-1, 1, C3k2Rep, [96, False]] # 10 P3 intermediate
+  - [-1, 1, nn.Upsample, [None, 2, "bilinear"]] # 11 P3 -> P2 size
+  - [[-1, 2], 1, BiFPNCat, [2]] # 12 96+64=160
+  - [-1, 1, C3k2Rep, [48, False]] # 13 P2/4 out   (ECA dropped after this)
+  # bottom-up
+  - [-1, 1, SPDConvGroup, [96]] # 14 P2 -> P3 size
+  - [[-1, 10], 1, BiFPNCat, [2]] # 15 96+96=192
+  - [-1, 1, C3k2Rep, [96, False]] # 16 P3/8 out
+  - [-1, 1, SPDConvGroup, [128]] # 17 P3 -> P4 size
+  - [[-1, 7], 1, BiFPNCat, [2]] # 18 128+128=256
+  - [-1, 1, C3k2Rep, [128, True]] # 19 P4/16 out
+
+  - [[13, 16, 19], 1, LSCDetect, [nc, 48]] # 20 shared-conv GN head (P2, P3, P4), hidc=48

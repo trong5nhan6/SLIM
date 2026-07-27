@@ -1,17 +1,18 @@
-"""LWSO idea package: lightweight small-object YOLO for VisDrone2019, built on ultralytics.
+"""Shared building blocks for the Ours (slim) family — NOT an idea of its own.
 
-Submodules:
-    modules.py   - SPDConv, C3k2Ghost, EMA, DySample, BiFPNCat (custom nn.Module blocks)
-    register.py  - register_lwso(): runtime registration into ultralytics parse_model
-    losses.py    - NWDBboxLoss / patch_nwd_loss(): CIoU-NWD blend loss
-    model.py     - LWSOModel: the idea class, drives build()/train() for --idea lwso
+This package used to back `--idea lwso`. That idea is gone; what stayed is the block
+library everything else is built on, so the package remains as a plain dependency of
+models/slim/:
 
-Only LWSOModel is re-exported here (import-light: no torch/ultralytics at package
-init) so `from models import MODEL_REGISTRY` stays cheap for train.py's argparse
-setup. Import modules/register/losses directly, e.g. `from models.lwso.modules
-import SPDConv`, when you actually need them (tests, val.py, ...).
+    modules.py   - SPDConv(Group), C3k2Ghost, EMA, ECA, DySample, BiFPNCat (nn.Module blocks)
+    register.py  - register_lwso(): runtime registration into ultralytics parse_model,
+                   called by models.slim.register.register_slim()
+    losses.py    - NWDBboxLoss / patch_nwd_loss(): CIoU-NWD blend loss, used by every
+                   config with `use_nwd: true`
+
+Nothing is re-exported here on purpose (import-light: no torch/ultralytics at package
+init) so `from models import MODEL_REGISTRY` stays cheap for train.py's argparse setup.
+Import what you need directly, e.g. `from models.lwso.modules import SPDConvGroup`.
 """
 
-from .model import LWSOModel
-
-__all__ = ["LWSOModel"]
+__all__: list[str] = []

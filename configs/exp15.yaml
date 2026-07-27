@@ -1,0 +1,6 @@
+# EXP15 — EXP04 minus all attention (EMA + C2PSA + ECA)
+# Table 4, row 15. 0.827M / 8.77G — all three removed together, so this row cannot attribute an effect to any one of them.
+idea: slim
+model_cfg: cfg/exp15-noattn-yolo11n.yaml
+use_nwd: true
+name: exp15

@@ -1,0 +1,6 @@
+# EXP10 — YOLOv11m — stock, trained from scratch (OPTIONAL)
+# Table 3, row 10. Paired with EXP07: run both or neither. ~20.1M / ~68G, 3-4x the T4 time of EXP09.
+idea: baseline
+model_cfg: cfg/exp10-base-yolo11m.yaml
+use_nwd: false
+name: exp10

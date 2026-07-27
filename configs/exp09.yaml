@@ -1,0 +1,6 @@
+# EXP09 — YOLOv11s — stock, trained from scratch
+# Table 3, row 9. Already trained: 9.417M / 21.32G / mAP50 0.3679 (note: that run used batch=32 while the others used 16).
+idea: baseline
+model_cfg: cfg/exp09-base-yolo11s.yaml
+use_nwd: false
+name: exp09

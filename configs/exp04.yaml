@@ -1,0 +1,6 @@
+# EXP04 — Ours-N — bilinear + C3k2Rep (FLAGSHIP)
+# Table 2 row 4 = Table 3 row 5 = Table 4 row 11. Already trained: 0.893M / 9.23G / mAP50 0.3284.
+idea: slim
+model_cfg: cfg/exp04-ours-yolo11n.yaml
+use_nwd: true
+name: exp04

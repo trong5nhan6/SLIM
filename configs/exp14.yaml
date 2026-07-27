@@ -1,0 +1,6 @@
+# EXP14 — EXP04 minus NWD (plain CIoU box loss)
+# Table 4, row 14. Config-only ablation: the architecture is byte-identical to EXP04, so params / GFLOPs / latency are unchanged (0.893M / 9.23G) and only the loss differs.
+idea: slim
+model_cfg: cfg/exp04-ours-yolo11n.yaml
+use_nwd: false
+name: exp14

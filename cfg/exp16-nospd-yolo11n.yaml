@@ -1,0 +1,56 @@
+# EXP16 (Table 4, row 16) — EXP04 with every SPDConvGroup replaced by a stride-2 Conv.
+#
+# SPDConvGroup rearranges each 2x2 spatial block into 4x the channels (lossless: no pixel
+# is discarded) and then mixes with a GROUPED 3x3 conv. A stride-2 conv instead samples
+# sparsely, throwing away 3 of every 4 pixels -- exactly the information a few-pixel object
+# cannot spare.
+#
+# Measured (build + fuse, imgsz 640): 1.063M / 10.26 GFLOPs vs EXP04's 0.893M / 9.23G.
+# Removing SPDConv makes the model MORE expensive, which is the interesting part: a dense
+# stride-2 3x3 costs c1*c2*9 MACs per output pixel, while SPDConvGroup costs
+# (4*c1)*c2*9/8 = 0.5*c1*c2*9 -- literally half, because the grouping (g=8) more than pays
+# for the 4x channel widening.
+#
+# So this row can win on BOTH axes at once: if mAP also drops without SPDConv, the block is
+# cheaper AND more accurate than the conventional alternative. That is the cleanest kind of
+# result an ablation table can produce, which is why this row is worth a run even though it
+# started life as optional.
+#
+# Run: python train.py --config configs/exp16.yaml
+
+nc: 10 # VisDrone classes
+
+scales: # [depth, width, max_channels]
+  n: [1.00, 1.00, 1024]
+
+backbone:
+  # [from, repeats, module, args]                    (shapes @ 960x960 input, n scale)
+  - [-1, 1, Conv, [16, 3, 2]] # 0  P1/2   16x480x480
+  - [-1, 1, Conv, [32, 3, 2]] # 1  P2/4   32x240x240   (was SPDConvGroup)
+  - [-1, 2, C3k2Rep, [64, False, 0.25]] # 2         64x240x240
+  - [-1, 1, Conv, [64, 3, 2]] # 3  P3/8   64x120x120   (was SPDConvGroup)
+  - [-1, 2, C3k2Rep, [128, False, 0.25]] # 4        128x120x120
+  - [-1, 1, EMA, [128]] # 5         128x120x120
+  - [-1, 1, Conv, [128, 3, 2]] # 6  P4/16  128x60x60    (was SPDConvGroup)
+  - [-1, 2, C3k2Rep, [128, True]] # 7               128x60x60
+  - [-1, 1, SPPF, [128, 5]] # 8               128x60x60
+  - [-1, 1, C2PSA, [128]] # 9               128x60x60
+
+head:
+  # top-down
+  - [-1, 1, nn.Upsample, [None, 2, "bilinear"]] # 10 P4 -> P3 size
+  - [[-1, 5], 1, BiFPNCat, [2]] # 11 128+128=256
+  - [-1, 1, C3k2Rep, [96, False]] # 12 P3 intermediate
+  - [-1, 1, nn.Upsample, [None, 2, "bilinear"]] # 13 P3 -> P2 size
+  - [[-1, 2], 1, BiFPNCat, [2]] # 14 96+64=160
+  - [-1, 1, C3k2Rep, [48, False]] # 15 P2/4 out
+  - [-1, 1, ECA, [48]] # 16 cheap channel attention on P2 (small-object features)
+  # bottom-up
+  - [-1, 1, Conv, [96, 3, 2]] # 17 P2 -> P3 size   (was SPDConvGroup)
+  - [[-1, 12], 1, BiFPNCat, [2]] # 18 96+96=192
+  - [-1, 1, C3k2Rep, [96, False]] # 19 P3/8 out
+  - [-1, 1, Conv, [128, 3, 2]] # 20 P3 -> P4 size   (was SPDConvGroup)
+  - [[-1, 9], 1, BiFPNCat, [2]] # 21 128+128=256
+  - [-1, 1, C3k2Rep, [128, True]] # 22 P4/16 out
+
+  - [[16, 19, 22], 1, LSCDetect, [nc, 48]] # 23 shared-conv GN head (P2, P3, P4), hidc=48

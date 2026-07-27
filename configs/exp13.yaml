@@ -1,0 +1,6 @@
+# EXP13 — EXP04 minus the P2 branch (head = P3 + P4)
+# Table 4, row 13. 0.774M / 5.47G — P2 is 41% of the model's compute.
+idea: slim
+model_cfg: cfg/exp13-nop2-yolo11n.yaml
+use_nwd: true
+name: exp13

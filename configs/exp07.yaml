@@ -1,0 +1,6 @@
+# EXP07 — Ours-M — m-scale build of EXP04 (OPTIONAL)
+# Table 3, row 7. Paired with EXP10: run both or neither.
+idea: slim
+model_cfg: cfg/exp07-ours-yolo11m.yaml
+use_nwd: true
+name: exp07

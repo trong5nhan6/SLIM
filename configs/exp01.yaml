@@ -1,0 +1,6 @@
+# EXP01 — SLIM: DySample + C3k2Ghost (baseline of the 2x2 grid)
+# Table 2, row 1. Already trained: 0.557M / 6.16G / mAP50 0.2943.
+idea: slim
+model_cfg: cfg/exp01-slim-yolo11n.yaml
+use_nwd: true
+name: exp01

@@ -1,8 +1,8 @@
 """Idea: baseline — stock YOLO11n, no custom modules, no NWD loss.
 
-Reference point cho mọi idea khác. cfg.model_cfg thường là yolo11n.pt (finetune
-từ COCO-pretrained) hoặc cfg/base-yolo11n.yaml (train from-scratch, cùng recipe
-với các idea khác để so sánh công bằng hơn) — xem configs/baseline.yaml.
+Reference point cho họ Ours. Dùng cho 3 dòng YOLOv11 gốc của Bảng 3:
+cfg/exp08-base-yolo11n.yaml, exp09 (s), exp10 (m) — đều train from-scratch cùng
+recipe với họ Ours để so sánh công bằng (xem configs/exp08.yaml).
 """
 
 from __future__ import annotations

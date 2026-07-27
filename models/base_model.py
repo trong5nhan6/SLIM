@@ -13,7 +13,40 @@ build --idea's argparse choices, before any heavy import happens.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Callable
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+LOG_WIDTH = 58
+
+
+def log_path_for(name: str) -> Path:
+    """<repo>/logs/<name>.log, parent created. Absolute so the file lands in the same
+    place no matter what cwd train.py/val.py were launched from."""
+    p = REPO_ROOT / "logs" / f"{name}.log"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def append_log(path, lines, echo: bool = False) -> None:
+    """Append lines to a log file; optionally mirror them to stdout."""
+    text = "\n".join(lines)
+    if echo:
+        print(text)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(text + "\n")
+
+
+def log_row(label: str, value) -> str:
+    return f"  {label:<32} {value}"
+
+
+def log_banner(title: str) -> list[str]:
+    """Section header, timestamped so several runs appending to one file stay readable."""
+    from datetime import datetime
+
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return ["", "=" * LOG_WIDTH, f"  {title}", f"  {stamp}", "=" * LOG_WIDTH]
 
 
 class BaseModel(ABC):
@@ -44,24 +77,21 @@ class BaseModel(ABC):
     def get_callbacks(self) -> dict[str, Callable]:
         """Extra ultralytics callbacks to register before train().
 
-        Default: test-set monitoring every cfg.test_every epochs (0 disables),
-        shared by every idea since it doesn't depend on architecture/loss. To
-        add idea-specific callbacks in a subclass, merge with this dict rather
-        than replacing it (unless you mean to drop test-set monitoring):
+        Default: write logs/<cfg.name>.log -- a model-info header, one line per epoch,
+        a periodic test-split + efficiency block (every cfg.test_every epochs, 0 disables
+        just that part), and a closing summary. Shared by every idea since none of it
+        depends on architecture/loss. To add idea-specific callbacks in a subclass, merge
+        with this dict rather than replacing it:
             def get_callbacks(self):
                 return {**super().get_callbacks(), "on_train_epoch_end": my_cb}
         """
         test_every = int(self.cfg.get("test_every", 0) or 0)
+        path = log_path_for(str(self.cfg.name))
+        print(f"[log] train/test log -> {path}")
         if test_every <= 0:
-            return {}
-        print(f"[lwso] test-set eval every {test_every} epochs enabled "
-              f"-> logs/{self.cfg.name}.log")
-        return {
-            "on_fit_epoch_end": _build_test_eval_callback(
-                str(self.cfg.data), int(self.cfg.imgsz), int(self.cfg.batch),
-                test_every, str(self.cfg.name),
-            )
-        }
+            print("[log] test_every=0 -> chi ghi header + per-epoch + summary, "
+                  "khong co block test-split/efficiency")
+        return _build_log_callbacks(self.cfg, self._yolo, test_every, path)
 
     def train(self, **train_kwargs) -> None:
         assert self._yolo is not None, "build() must run before train()"
@@ -77,13 +107,22 @@ class BaseModel(ABC):
         return self._yolo
 
 
-def _compute_efficiency_metrics(model, imgsz: int, device, warmup: int = 10, runs: int = 30) -> dict:
-    """Params/GFLOPs/theoretical size + batch=1 latency/FPS for `model` on `device`.
+def _compute_efficiency_metrics(
+    model, imgsz: int, device, warmup: int = 10, runs: int = 30, ckpt_path=None
+) -> dict:
+    """Params/GFLOPs/size + batch=1 latency/FPS for `model` on `device`.
 
-    `model_size_mb` is params*4 bytes (fp32), not a measured file size -- this callback
-    never writes model to disk, so there's no checkpoint to stat(). Latency/FPS come from
-    real forward passes (warmup then timed loop), matching how yolov12n-visdrone's
-    utils.metrics.compute_efficiency_metrics measures it, for cross-project comparability.
+    Two size numbers, because they are NOT interchangeable and papers report the second:
+      * `model_size_mb`  = params*4 bytes, the fp32 theoretical size. Always available.
+      * `file_size_mb`   = os.path.getsize(ckpt_path), the real checkpoint on disk, only
+        when `ckpt_path` is given (the training callback has no file to stat). Ultralytics
+        saves checkpoints in fp16, so this lands at roughly HALF the fp32 number -- quoting
+        the fp32 one next to a paper's reported weight-file size makes our model look twice
+        as heavy as it is.
+
+    Latency/FPS come from real forward passes (warmup then timed loop), matching how
+    yolov12n-visdrone's utils.metrics.compute_efficiency_metrics measures it, for
+    cross-project comparability.
     """
     import time
 
@@ -109,10 +148,20 @@ def _compute_efficiency_metrics(model, imgsz: int, device, warmup: int = 10, run
         t1 = time.perf_counter()
 
     latency_ms = (t1 - t0) / runs * 1000
+    file_size_mb = None
+    if ckpt_path is not None:
+        import os
+
+        try:
+            file_size_mb = os.path.getsize(str(ckpt_path)) / 1e6
+        except OSError:
+            file_size_mb = None  # path gone/unreadable -- fp32 number still reported
+
     return {
         "params_m": params / 1e6,
         "gflops": gflops,
         "model_size_mb": params * 4 / 1e6,  # fp32 theoretical
+        "file_size_mb": file_size_mb,  # real .pt on disk (fp16), None if no path given
         "latency_ms": latency_ms,
         "fps": 1000 / latency_ms if latency_ms > 0 else float("inf"),
         "device": str(dev),
@@ -122,17 +171,23 @@ def _compute_efficiency_metrics(model, imgsz: int, device, warmup: int = 10, run
 def _format_efficiency_report(eff: dict) -> list[str]:
     w = 58
     row = lambda label, value: f"  {label:<32} {value}"  # noqa: E731
-    return [
+    lines = [
         "-" * w,
         "  EFFICIENCY METRICS",
         "-" * w,
         row("Parameters", f"{eff['params_m']:.3f} M"),
         row("GFLOPs", f"{eff['gflops']:.2f} G"),
         row("Model size (fp32, theoretical)", f"{eff['model_size_mb']:.2f} MB"),
+    ]
+    if eff.get("file_size_mb") is not None:
+        # The number to put in a paper table -- same quantity other papers quote.
+        lines.append(row("Checkpoint file size (.pt)", f"{eff['file_size_mb']:.2f} MB"))
+    lines += [
         row("Latency (batch=1)", f"{eff['latency_ms']:.2f} ms/img"),
         row("FPS (batch=1)", f"{eff['fps']:.1f} fps"),
         row("Device", eff["device"]),
     ]
+    return lines
 
 
 def _format_epoch_line(trainer, epoch: int) -> str:
@@ -167,36 +222,82 @@ def _format_epoch_line(trainer, epoch: int) -> str:
     return f"[EPOCH {epoch:>4}/{total}]  {loss_str}  |  {metric_str}  |  {lr_str}"
 
 
-def _build_test_eval_callback(data: str, imgsz: int, batch: int, every: int, log_name: str):
-    """Writes <repo_root>/logs/<log_name>.log with a per-epoch train/val trace (every
-    epoch) plus, every `every` epochs, a test-dev split mAP + efficiency metrics
-    (params/GFLOPs/latency/FPS) block -- printed to console too. Also appends the
-    periodic block to <save_dir>/test_metrics.csv.
+def _format_model_info(cfg, model) -> list[str]:
+    """The 'what was this run' block: which config/architecture, how big, what recipe.
 
-    Uses a standalone DetectionValidator (model=... path, not trainer=...) so it never
-    touches trainer.validator / trainer.stopper / best.pt selection, which stay driven by
-    the ordinary val split. Test mAP here is for monitoring only, not for model selection
-    (test-dev has no official public labels; treat any local labels as unofficial).
+    Params/GFLOPs are measured on the real built model rather than copied from a comment,
+    and no latency benchmark runs here -- at on_train_start the model may still be on CPU,
+    and the meaningful device-side number is already produced by the periodic
+    EFFICIENCY METRICS block below.
+    """
+    from ultralytics.utils.torch_utils import get_flops, get_num_params
 
-    Validates a deepcopy of the EMA weights, not the live trainer.ema.ema reference:
+    imgsz = int(cfg.imgsz)
+    nwd = (
+        f"CIoU-NWD blend (ratio={cfg.get('nwd_ratio', 0.5)}, C={cfg.get('nwd_constant', 12.8)})"
+        if cfg.get("use_nwd")
+        else "CIoU only (no NWD)"
+    )
+    params = get_num_params(model)
+    return [
+        log_row("Config", cfg.get("config_file", "(--idea, khong qua --config)")),
+        log_row("Idea", cfg.idea),
+        log_row("Model cfg", cfg.model_cfg),
+        # Unfused count on purpose: fusing happens later, and ultralytics' own "N layers"
+        # line is the FUSED number -- labelling this avoids two different counts in one log.
+        log_row("Layers (unfused)", len(list(model.modules()))),
+        log_row("Parameters", f"{params / 1e6:.3f} M"),
+        log_row("GFLOPs", f"{get_flops(model, imgsz):.2f} G @ imgsz {imgsz}"),
+        log_row("Loss", nwd),
+        log_row("Data", cfg.data),
+        log_row(
+            "Recipe",
+            f"epochs={cfg.epochs} imgsz={imgsz} batch={cfg.batch} "
+            f"seed={cfg.get('seed')} device={cfg.get('device')}",
+        ),
+    ]
+
+
+def _build_log_callbacks(cfg, yolo, every: int, path) -> dict[str, Callable]:
+    """Callbacks that write logs/<cfg.name>.log for one training run.
+
+    Layout of the file:
+        RUN <name> banner + model info      (on_train_start)
+        [EPOCH n/N] one line per epoch      (on_fit_epoch_end, always)
+        test-split mAP + EFFICIENCY METRICS (on_fit_epoch_end, every `every` epochs)
+        SUMMARY banner                      (on_train_end)
+    val.py later appends its own EVAL blocks to the SAME file, so one config ends up with
+    one log holding train, test and model info together.
+
+    The periodic block uses a standalone DetectionValidator (model=... path, not
+    trainer=...) so it never touches trainer.validator / trainer.stopper / best.pt
+    selection, which stay driven by the ordinary val split. Test mAP here is monitoring
+    only, not model selection (test-dev has no official public labels).
+
+    It validates a deepcopy of the EMA weights, not the live trainer.ema.ema reference:
     AutoBackend fuses whatever nn.Module it's handed (in place, `model.fuse()`), which
-    permanently changes its state_dict keys. Handing it the live EMA model corrupts it
-    and crashes the next `ema.update(self.model)` call with a KeyError. The deepcopy is
-    reused for the efficiency benchmark too (fusion there is harmless/even representative
-    of real deployment latency) since it's discarded at the end of this callback either way.
+    permanently changes its state_dict keys. Handing it the live EMA model corrupts it and
+    crashes the next `ema.update(self.model)` call with a KeyError. The deepcopy is reused
+    for the efficiency benchmark too (fusion there is harmless, and representative of real
+    deployment latency) since it is discarded at the end of the callback either way.
     """
     import copy
-    from pathlib import Path
 
     from ultralytics.models.yolo.detect import DetectionValidator
     from ultralytics.utils import RANK
 
-    state = {"validator": None, "csv_path": None, "log_path": None, "last_epoch": None}
+    imgsz, batch = int(cfg.imgsz), int(cfg.batch)
+    state = {"validator": None, "csv_path": None, "last_epoch": None}
 
-    def _log(msg: str) -> None:
-        print(msg)
-        with open(state["log_path"], "a", encoding="utf-8") as f:
-            f.write(msg + "\n")
+    def _log(lines, echo: bool = False) -> None:
+        append_log(path, lines if isinstance(lines, list) else [lines], echo=echo)
+
+    def _on_train_start(trainer):
+        if RANK not in (-1, 0):
+            return
+        _log(log_banner(f"RUN {cfg.name}"))
+        _log(_format_model_info(cfg, trainer.model))
+        _log([log_row("Output dir", trainer.save_dir), ""])
 
     def _on_fit_epoch_end(trainer):
         if RANK not in (-1, 0):
@@ -208,22 +309,15 @@ def _build_test_eval_callback(data: str, imgsz: int, batch: int, every: int, log
             return
         state["last_epoch"] = epoch
 
-        if state["log_path"] is None:
-            logs_dir = Path("logs")
-            logs_dir.mkdir(parents=True, exist_ok=True)
-            state["log_path"] = logs_dir / f"{log_name}.log"
-            print(f"[lwso] text log -> {state['log_path']}")
+        _log(_format_epoch_line(trainer, epoch))  # file only -- ultralytics prints its own
 
-        with open(state["log_path"], "a", encoding="utf-8") as f:
-            f.write(_format_epoch_line(trainer, epoch) + "\n")
-
-        if epoch % every != 0:
+        if every <= 0 or epoch % every != 0:
             return
 
         if state["validator"] is None:
             state["validator"] = DetectionValidator(
                 args=dict(
-                    data=data,
+                    data=str(cfg.data),
                     split="test",
                     imgsz=imgsz,
                     batch=batch,
@@ -238,17 +332,18 @@ def _build_test_eval_callback(data: str, imgsz: int, batch: int, every: int, log
                 state["csv_path"].write_text(
                     "epoch,mAP50,mAP50-95,params_m,gflops,model_size_mb,latency_ms,fps\n"
                 )
-            print(f"[lwso] test-set eval log -> {state['csv_path']}")
+            print(f"[log] test-set eval csv -> {state['csv_path']}")
 
-        _log(f"\n[lwso] test-set eval @ epoch {epoch}")
+        _log([f"", f"[test-set eval @ epoch {epoch}]"], echo=True)
         model = copy.deepcopy(trainer.ema.ema or trainer.model)
         stats = state["validator"](model=model)
         map50 = stats.get("metrics/mAP50(B)", float("nan"))
         map5095 = stats.get("metrics/mAP50-95(B)", float("nan"))
+        _log([log_row("test mAP50", f"{map50:.4f}"),
+              log_row("test mAP50-95", f"{map5095:.4f}")], echo=True)
 
         eff = _compute_efficiency_metrics(model, imgsz, trainer.device)
-        for line in _format_efficiency_report(eff):
-            _log(line)
+        _log(_format_efficiency_report(eff), echo=True)
 
         with open(state["csv_path"], "a") as f:
             f.write(
@@ -256,4 +351,23 @@ def _build_test_eval_callback(data: str, imgsz: int, batch: int, every: int, log
                 f"{eff['model_size_mb']:.5f},{eff['latency_ms']:.5f},{eff['fps']:.5f}\n"
             )
 
-    return _on_fit_epoch_end
+    def _on_train_end(trainer):
+        if RANK not in (-1, 0):
+            return
+        best_fit = getattr(trainer, "best_fitness", None)
+        _log(log_banner(f"SUMMARY {cfg.name}"))
+        _log([
+            log_row("Epochs completed", state["last_epoch"] or "?"),
+            log_row("Best fitness", f"{float(best_fit):.5f}" if best_fit is not None else "N/A"),
+            log_row("Best weights", getattr(trainer, "best", "?")),
+            log_row("Output dir", trainer.save_dir),
+            "",
+            "  Chay val.py voi best.pt de ghi tiep block EVAL (val + test) vao chinh file nay.",
+            "",
+        ])
+
+    return {
+        "on_train_start": _on_train_start,
+        "on_fit_epoch_end": _on_fit_epoch_end,
+        "on_train_end": _on_train_end,
+    }

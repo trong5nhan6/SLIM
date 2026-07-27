@@ -1,7 +1,7 @@
-"""Idea: slim — lwso-yolo11n-eff frame + LSCDetect shared GroupNorm head + thinner P2 neck,
-+ optional CIoU-NWD blend loss (same loss recipe as the winning lwso-eff run, so the
-architecture change is the only moving part vs that result). See modules.py/register.py
-in this package; this file is just the idea class train.py drives via models.build_model().
+"""Idea: slim — the "Ours" family: LSCDetect shared GroupNorm head + thinner P2 neck +
+RepConv blocks, with an optional CIoU-NWD blend loss (`use_nwd`). Every cfg/exp*.yaml that
+is not a stock YOLOv11 baseline is built by this class. See modules.py/register.py in this
+package; this file is just the idea class train.py drives via models.build_model().
 """
 
 from __future__ import annotations

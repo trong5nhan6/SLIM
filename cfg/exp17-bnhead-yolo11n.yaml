@@ -1,0 +1,56 @@
+# EXP17 (Table 4, row 17) — EXP04 with a BatchNorm detect head instead of GroupNorm.
+#
+# LSCDetectBN has the identical shared-conv structure as LSCDetect, but every ConvGN
+# becomes the stock ultralytics Conv (Conv2d + BN + SiLU).
+#
+# This row is about LATENCY, not mAP, and it is invisible to FLOPs: params and GFLOPs come
+# out identical (0.893M / 9.23G), yet the fused module count drops 93 -> 83. GroupNorm
+# cannot be folded into the preceding convolution, so a GN head keeps three separate
+# kernels (conv, norm, act) at EVERY detect scale -- and P2 pays that at 4x the linear
+# resolution. BN folds away entirely in DetectionModel.fuse().
+#
+# The trade-off runs the other way on accuracy: training uses batch=8, where per-scale BN
+# statistics are noisy, and one shared BN in the shared stack sees P2/P3/P4 activations
+# sequentially and averages over all three. That is exactly why GN was chosen originally.
+# An earlier run of this swap on the Ghost-based architecture measured -0.62 mAP50 for
+# -0.50 ms, i.e. a losing trade -- which is why this row sits at the bottom of the
+# priority list. Run it only if the paper wants a latency-side row.
+#
+# Run: python train.py --config configs/exp17.yaml
+
+nc: 10 # VisDrone classes
+
+scales: # [depth, width, max_channels]
+  n: [1.00, 1.00, 1024]
+
+backbone:
+  # [from, repeats, module, args]                    (shapes @ 960x960 input, n scale)
+  - [-1, 1, Conv, [16, 3, 2]] # 0  P1/2   16x480x480
+  - [-1, 1, SPDConvGroup, [32]] # 1  P2/4   32x240x240
+  - [-1, 2, C3k2Rep, [64, False, 0.25]] # 2         64x240x240
+  - [-1, 1, SPDConvGroup, [64]] # 3  P3/8   64x120x120
+  - [-1, 2, C3k2Rep, [128, False, 0.25]] # 4        128x120x120
+  - [-1, 1, EMA, [128]] # 5         128x120x120
+  - [-1, 1, SPDConvGroup, [128]] # 6  P4/16  128x60x60
+  - [-1, 2, C3k2Rep, [128, True]] # 7               128x60x60
+  - [-1, 1, SPPF, [128, 5]] # 8               128x60x60
+  - [-1, 1, C2PSA, [128]] # 9               128x60x60
+
+head:
+  # top-down
+  - [-1, 1, nn.Upsample, [None, 2, "bilinear"]] # 10 P4 -> P3 size
+  - [[-1, 5], 1, BiFPNCat, [2]] # 11 128+128=256
+  - [-1, 1, C3k2Rep, [96, False]] # 12 P3 intermediate
+  - [-1, 1, nn.Upsample, [None, 2, "bilinear"]] # 13 P3 -> P2 size
+  - [[-1, 2], 1, BiFPNCat, [2]] # 14 96+64=160
+  - [-1, 1, C3k2Rep, [48, False]] # 15 P2/4 out
+  - [-1, 1, ECA, [48]] # 16 cheap channel attention on P2 (small-object features)
+  # bottom-up
+  - [-1, 1, SPDConvGroup, [96]] # 17 P2 -> P3 size
+  - [[-1, 12], 1, BiFPNCat, [2]] # 18 96+96=192
+  - [-1, 1, C3k2Rep, [96, False]] # 19 P3/8 out
+  - [-1, 1, SPDConvGroup, [128]] # 20 P3 -> P4 size
+  - [[-1, 9], 1, BiFPNCat, [2]] # 21 128+128=256
+  - [-1, 1, C3k2Rep, [128, True]] # 22 P4/16 out
+
+  - [[16, 19, 22], 1, LSCDetectBN, [nc, 48]] # 23 fuse-able BN head (was LSCDetect/GN)

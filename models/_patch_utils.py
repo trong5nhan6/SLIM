@@ -38,18 +38,18 @@ def patch_ddp_registration() -> None:
     .py file executed by a fresh `torch.distributed.run` subprocess per GPU. That
     file only imports `ultralytics.models.yolo.detect.train.DetectionTrainer` and
     builds a trainer from `overrides["model"]` (a path string like
-    "cfg/lwso-yolo11n.yaml") -- it never imports this project's code, so
-    register_lwso()/register_fap()'s runtime monkeypatch of
+    "cfg/exp04-ours-yolo11n.yaml") -- it never imports this project's code, so
+    register_slim()/register_lwso()'s runtime monkeypatch of
     ultralytics.nn.tasks.parse_model (needed to recognize our custom module names)
     never happens in that subprocess, and parse_model() raises the moment it hits
     an unrecognized module name.
 
     Fix, in the same "patch without forking ultralytics" spirit as register_lwso()/
-    register_fap(): wrap generate_ddp_file so the generated temp file also runs our
-    registration first. Always registers lwso/fap/star (idempotent, harmless for
-    --idea baseline / any stock model_cfg) since we don't know here which idea is
-    active. Idempotent at the process level too (safe to call from every
-    BaseModel.train(), which is where this gets called from).
+    register_slim(): wrap generate_ddp_file so the generated temp file also runs our
+    registration first. Always registers (idempotent, harmless for idea baseline / any
+    stock model_cfg) since we don't know here which idea is active. register_slim()
+    pulls in register_lwso() for the shared blocks. Idempotent at the process level too
+    (safe to call from every BaseModel.train(), which is where this gets called from).
     """
     import ultralytics.utils.dist as dist_mod
 
@@ -61,14 +61,8 @@ def patch_ddp_registration() -> None:
     injection = (
         "    import sys\n"
         f"    sys.path.insert(0, {str(REPO_ROOT)!r})\n"
-        "    from models.fap.register import register_fap\n"
-        "    from models.lwso.register import register_lwso\n"
         "    from models.slim.register import register_slim\n"
-        "    from models.star.register import register_star\n"
-        "    register_lwso()\n"
-        "    register_fap()\n"
-        "    register_star()\n"
-        "    register_slim()\n"
+        "    register_slim()\n"  # calls register_lwso() for the shared blocks
     )
 
     def generate_ddp_file_with_registration(trainer):

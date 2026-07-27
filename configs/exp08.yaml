@@ -1,0 +1,8 @@
+# EXP08 — YOLOv11n — stock, trained from scratch
+# Table 3, row 8. Already trained: 2.584M / 6.30G / mAP50 0.2960.
+# model_cfg points at the .yaml, NOT yolo11n.pt: this row must be trained from scratch
+# on the same recipe as the Ours family, otherwise the comparison imports COCO pretraining.
+idea: baseline
+model_cfg: cfg/exp08-base-yolo11n.yaml
+use_nwd: false
+name: exp08

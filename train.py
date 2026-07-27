@@ -1,52 +1,48 @@
 #!/usr/bin/env python3
-"""Train LWSO-YOLO (or baseline) on VisDrone2019, config-driven.
+"""Train the Ours (slim) family or a stock YOLOv11 baseline on VisDrone2019, config-driven.
 
-Config layering: configs/base.yaml (defaults) <- configs/<idea>.yaml (override
-theo idea, auto-resolved từ --idea, hoặc trỏ thẳng bằng --config) <- CLI flags
-(override cuối cùng, chỉ áp khi thực sự được truyền).
+Config layering: configs/base.yaml (defaults) <- configs/exp<NN>.yaml (1 file cho mỗi
+dòng thí nghiệm, trỏ thẳng bằng --config; hoặc configs/<idea>.yaml auto-resolved từ
+--idea) <- CLI flags (override cuối cùng, chỉ áp khi thực sự được truyền).
 
 Idea nào cũng đăng ký trong models/ (xem models/__init__.py MODEL_REGISTRY) —
---idea nhận choices trực tiếp từ đó, thêm idea mới không cần sửa file này
-(xem models/__init__.py để biết 3 bước thêm 1 idea).
+--idea nhận choices trực tiếp từ đó, thêm idea mới không cần sửa file này.
 
-Model options (--model, override cfg.model_cfg của configs/<idea>.yaml):
-    yolo11n.pt                          baseline YOLO11n gốc, finetune COCO-pretrained  (idea baseline)
-    cfg/base-yolo11n.yaml               baseline YOLO11n gốc, train from-scratch        (idea baseline)
-    cfg/ablation/yolo11n-p2-nop5.yaml   ablation: chỉ +P2/-P5, module gốc 100%          (idea baseline)
-    cfg/lwso-yolo11n.yaml               LWSO đầy đủ: 2.40M params, 21.5 GFLOPs@640      (idea lwso, mặc định)
-    cfg/lwso-yolo11n-lite.yaml          LWSO cắt compute mạnh: 1.12M, 12.8 GFLOPs@640   (idea lwso)
-    cfg/lwso-yolo11n-eff.yaml           LWSO đề xuất: 0.96M, 12.4 GFLOPs@640, +ECA ở P2 (idea lwso)
-    cfg/lwso-yolo11s.yaml               bản s — teacher cho knowledge distillation      (idea lwso)
-    cfg/star-yolo11n.yaml               StarBlock+GSConv+SimAM+WIoU: 0.65M, 7.6 GFLOPs@640  (idea star)
+Mỗi config ứng với ĐÚNG một dòng trong results/SOTA-SLIM.xlsx:
+
+    Bảng 2 — đổi block (2x2 factorial: upsampler x block)
+      configs/exp01.yaml   DySample + C3k2Ghost (SLIM)      0.557M / 6.16G   [đã chạy]
+      configs/exp02.yaml   DySample + C3k2Rep               0.900M / 9.21G
+      configs/exp03.yaml   bilinear + C3k2Ghost             0.550M / 6.18G
+      configs/exp04.yaml   bilinear + C3k2Rep = Ours-N      0.893M / 9.23G   [đã chạy]
+
+    Bảng 3 — scale
+      configs/exp06.yaml   Ours-S                           2.250M / 22.31G
+      configs/exp07.yaml   Ours-M                (optional) 3.994M / 39.37G
+      configs/exp08.yaml   YOLOv11n from-scratch            2.584M / 6.32G   [đã chạy]
+      configs/exp09.yaml   YOLOv11s from-scratch            9.417M / 21.32G  [đã chạy]
+      configs/exp10.yaml   YOLOv11m from-scratch (optional) 20.04M / 67.69G
+
+    Bảng 4 — gỡ từng thành phần khỏi Ours-N
+      configs/exp12.yaml   - LSCDetect (stock Detect)       1.316M / 15.68G
+      configs/exp13.yaml   - nhánh P2 (head P3+P4)          0.774M / 5.47G
+      configs/exp14.yaml   - NWD (CIoU thuần, chỉ đổi loss) 0.893M / 9.23G
+      configs/exp15.yaml   - attention (EMA+C2PSA+ECA)      0.827M / 8.77G
+      configs/exp16.yaml   - SPDConv (Conv stride-2)        1.063M / 10.26G
+      configs/exp17.yaml   head GroupNorm -> BatchNorm      0.893M / 9.23G
+
+(params/GFLOPs ở trên là bản CHƯA fuse, đo @640 — xem tests/test_modules.py, nơi
+regression-guard đúng những con số này.)
 
 Examples:
-    # baseline (configs/baseline.yaml: YOLO11n gốc, finetune COCO, không NWD)
-    python train.py --idea baseline
-
-    # full LWSO model @960 với NWD blend loss (configs/lwso.yaml)
-    python train.py --idea lwso
-
-    # StarBlock+GSConv slim-neck+SimAM+Wise-IoU v3 (configs/star.yaml)
-    python train.py --idea star
-
-    # 1 trong các model option khác (xem bảng trên), vẫn cùng idea/recipe:
-    python train.py --idea lwso --model cfg/lwso-yolo11n-eff.yaml --name lwso-n-eff
+    # chạy 1 dòng trong bảng
+    python train.py --config configs/exp02.yaml
 
     # override vài hyperparam từ CLI, đè lên config
-    python train.py --idea lwso --imgsz 640 --batch 16 --name lwso-n-640
-
-    # ablation +P2/-P5 (module gốc): trỏ thẳng model, vẫn dùng idea baseline (no-nwd)
-    python train.py --idea baseline --model cfg/ablation/yolo11n-p2-nop5.yaml --name abl-p2
-
-    # trỏ thẳng 1 experiment yaml tùy ý, bỏ qua auto-resolve theo --idea
-    python train.py --config configs/lwso.yaml --epochs 50
+    python train.py --config configs/exp02.yaml --imgsz 640 --batch 16
 
     # log mAP tập test mỗi 10 epoch (monitoring, không dùng để chọn best.pt)
-    python train.py --idea lwso --test-every 10
-
-    # fine-tune sau khi prune.py (idea fap) — giữ sparsity mask trong suốt fine-tune
-    python train.py --idea fap --weights runs/detect/fap-n/weights/best.pruned.pt \\
-        --sparsity-mask runs/detect/fap-n/weights/best.pruned.mask.pt --epochs 10
+    python train.py --config configs/exp04.yaml --test-every 10
 """
 
 import argparse
@@ -108,9 +104,6 @@ def main():
     ap.add_argument("--device", default=None, help="e.g. 0 or 0,1 or cpu")
     ap.add_argument("--name", default=None, help="run name under runs/detect/")
     ap.add_argument("--weights", default=None, help="optional .pt to warm-start a .yaml model")
-    ap.add_argument("--sparsity-mask", default=None, dest="sparsity_mask",
-                     help="(idea fap) <out>.mask.pt from prune.py — re-applied after every "
-                          "optimizer step so a fine-tune can't undo the pruning via gradient drift")
     ap.add_argument("--multi-scale", dest="multi_scale", action="store_true", default=None,
                      help="multi-scale training (more VRAM)")
     ap.add_argument("--close-mosaic", type=int, default=None)
@@ -129,12 +122,23 @@ def main():
     args = ap.parse_args()
 
     exp_cfg = args.config or str(ROOT / "configs" / f"{args.idea}.yaml")
+    # Experiment configs are named per table row (configs/exp<NN>.yaml), so the old
+    # configs/<idea>.yaml auto-resolve no longer finds anything -- say so plainly instead
+    # of dying on a bare FileNotFoundError.
+    if not Path(exp_cfg).is_file():
+        available = ", ".join(sorted(p.name for p in (ROOT / "configs").glob("exp*.yaml")))
+        raise SystemExit(
+            f"config không tồn tại: {exp_cfg}\n"
+            f"Mỗi thí nghiệm là 1 file riêng, chạy bằng --config. Có sẵn: {available}"
+        )
     cfg = load_config(args.base_config, exp_cfg)
+    # Recorded in logs/<name>.log's header so a log always says which config produced it.
+    cfg["config_file"] = str(Path(exp_cfg).relative_to(ROOT)) if Path(exp_cfg).is_relative_to(ROOT) else exp_cfg
 
     overrides = {
         "model_cfg": args.model_cfg, "data": args.data, "imgsz": args.imgsz,
         "epochs": args.epochs, "batch": args.batch, "device": args.device,
-        "name": args.name, "weights": args.weights, "sparsity_mask": args.sparsity_mask,
+        "name": args.name, "weights": args.weights,
         "multi_scale": args.multi_scale,
         "close_mosaic": args.close_mosaic, "mixup": args.mixup, "patience": args.patience,
         "resume": args.resume, "seed": args.seed, "test_every": args.test_every,

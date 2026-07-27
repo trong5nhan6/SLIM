@@ -1,9 +1,11 @@
 """Custom head for idea "slim": LSCDetect — Lightweight Shared-Convolution Detect head.
 
 Motivation (measured on this repo's own models, not guessed): with a P2 head, the stock
-ultralytics Detect head is roughly *half* the parameters of a sub-1M model (star-yolo11n:
-~0.3M of 0.647M total) and a large GFLOPs slice, because cv2/cv3 run a private 2-conv stack
-per scale and the P2 scale pays it at 4x/16x the resolution of P3/P4. Literature (YOLOv8-PD,
+ultralytics Detect head is roughly *half* the parameters of a sub-1M model and a large
+GFLOPs slice, because cv2/cv3 run a private 2-conv stack per scale and the P2 scale pays it
+at 4x/16x the resolution of P3/P4. Measured on the flagship (cfg/exp12-nohead-yolo11n.yaml
+swaps LSCDetect back out): 0.893M/9.23G -> 1.316M/15.68G, i.e. +70% compute for the head
+alone. Literature (YOLOv8-PD,
 Sci Reports 2024; LEAD-YOLO, 2025; RSNet, arXiv:2410.23073) converges on the same fix,
 usually called LSCD:
 

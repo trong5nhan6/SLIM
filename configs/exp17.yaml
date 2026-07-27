@@ -1,0 +1,6 @@
+# EXP17 — EXP04 with a BatchNorm detect head
+# Table 4, row 17. Identical params / GFLOPs (0.893M / 9.23G) but 93 -> 83 fused modules: a latency row that FLOPs cannot see.
+idea: slim
+model_cfg: cfg/exp17-bnhead-yolo11n.yaml
+use_nwd: true
+name: exp17

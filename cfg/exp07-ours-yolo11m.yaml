@@ -1,0 +1,57 @@
+# EXP07 (Table 3, row 7, OPTIONAL) — Ours-M: the m-scale build of EXP04.
+#
+# Same filename-drives-scale convention as cfg/exp06-ours-yolo11s.yaml; only the m row of
+# `scales` and the hand-scaled hidc differ.
+#
+# CHOICE OF MULTIPLIERS -- this repo's slim family writes channels at n scale and defines
+# its own ladder (n = [1.00, 1.00], s = [1.33, 1.50]); it does NOT reuse stock YOLO11's
+# rows, which are written for a differently-parameterized file. m continues that ladder at
+# [1.67, 2.00, 1024], i.e. one more even step in both depth and width. That is a judgement
+# call, not something derived -- check the measured params/GFLOPs against where you want
+# this row to sit relative to YOLOv11m (~20.1M / ~68G) and retune the two numbers if it
+# lands in the wrong place.
+#
+# hidc is hand-written as 96 (= 48 x 2.00) because Detect-family head args bypass
+# parse_model's width scaling.
+#
+# This row is optional and paired with EXP10 (YOLOv11m): run both or neither, otherwise
+# there is nothing to compare it against.
+# Run: python train.py --config configs/exp07.yaml
+
+nc: 10 # VisDrone classes
+
+scales: # [depth, width, max_channels]
+  n: [1.00, 1.00, 1024] # channels below are written for the n scale
+  m: [1.67, 2.00, 1024] # picked via the 11m filename suffix
+
+backbone:
+  # [from, repeats, module, args]                    (shapes @ 960x960 input, n scale)
+  - [-1, 1, Conv, [16, 3, 2]] # 0  P1/2   16x480x480
+  - [-1, 1, SPDConvGroup, [32]] # 1  P2/4   32x240x240
+  - [-1, 2, C3k2Rep, [64, False, 0.25]] # 2         64x240x240
+  - [-1, 1, SPDConvGroup, [64]] # 3  P3/8   64x120x120
+  - [-1, 2, C3k2Rep, [128, False, 0.25]] # 4        128x120x120
+  - [-1, 1, EMA, [128]] # 5         128x120x120
+  - [-1, 1, SPDConvGroup, [128]] # 6  P4/16  128x60x60
+  - [-1, 2, C3k2Rep, [128, True]] # 7               128x60x60
+  - [-1, 1, SPPF, [128, 5]] # 8               128x60x60
+  - [-1, 1, C2PSA, [128]] # 9               128x60x60
+
+head:
+  # top-down
+  - [-1, 1, nn.Upsample, [None, 2, "bilinear"]] # 10 P4 -> P3 size
+  - [[-1, 5], 1, BiFPNCat, [2]] # 11 128+128=256
+  - [-1, 1, C3k2Rep, [96, False]] # 12 P3 intermediate
+  - [-1, 1, nn.Upsample, [None, 2, "bilinear"]] # 13 P3 -> P2 size
+  - [[-1, 2], 1, BiFPNCat, [2]] # 14 96+64=160
+  - [-1, 1, C3k2Rep, [48, False]] # 15 P2/4 out
+  - [-1, 1, ECA, [48]] # 16 cheap channel attention on P2 (small-object features)
+  # bottom-up
+  - [-1, 1, SPDConvGroup, [96]] # 17 P2 -> P3 size
+  - [[-1, 12], 1, BiFPNCat, [2]] # 18 96+96=192
+  - [-1, 1, C3k2Rep, [96, False]] # 19 P3/8 out
+  - [-1, 1, SPDConvGroup, [128]] # 20 P3 -> P4 size
+  - [[-1, 9], 1, BiFPNCat, [2]] # 21 128+128=256
+  - [-1, 1, C3k2Rep, [128, True]] # 22 P4/16 out
+
+  - [[16, 19, 22], 1, LSCDetect, [nc, 96]] # 23 shared-conv GN head, hidc=96 (48 x 2.0)

@@ -1,9 +1,0 @@
-# Idea slim — B2 ablation (safe): DySample -> bilinear upsample + C3k2Ghost -> C3k2Rep
-# (RepConv dense blocks), SPDConv kept. Trades FLOPs for lower batch=1 latency.
-# Same slim recipe (NWD blend). See cfg/slim-b2-yolo11n.yaml.
-# Measured @640: 0.938M params / 9.79 GFLOPs (FLOPs up by design — verify latency on GPU).
-# Run: python train.py --config configs/slim-b2.yaml
-idea: slim
-model_cfg: cfg/slim-b2-yolo11n.yaml
-use_nwd: true
-name: slim-b2

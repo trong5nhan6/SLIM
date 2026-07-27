@@ -1,0 +1,6 @@
+# EXP06 — Ours-S — s-scale build of EXP04
+# Table 3, row 6.
+idea: slim
+model_cfg: cfg/exp06-ours-yolo11s.yaml
+use_nwd: true
+name: exp06

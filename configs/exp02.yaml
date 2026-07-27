@@ -1,0 +1,6 @@
+# EXP02 — DySample + C3k2Rep (block swap only)
+# Table 2, row 2. Isolates what RepConv alone buys. 0.900M / 9.21G.
+idea: slim
+model_cfg: cfg/exp02-b2a-yolo11n.yaml
+use_nwd: true
+name: exp02

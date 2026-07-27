@@ -1,0 +1,6 @@
+# EXP12 — EXP04 minus LSCDetect (stock Detect head)
+# Table 4, row 12. 1.316M / 15.68G — the head swap alone costs +70% GFLOPs.
+idea: slim
+model_cfg: cfg/exp12-nohead-yolo11n.yaml
+use_nwd: true
+name: exp12

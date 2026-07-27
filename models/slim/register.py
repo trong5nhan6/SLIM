@@ -1,10 +1,9 @@
 """Register idea "slim"'s LSCDetect head into ultralytics without forking the repo — same
 source-patching trick as models/lwso/register.py (see that file for the full why).
 
-Builds on register_lwso(): cfg/slim-yolo11n.yaml is the lwso-yolo11n-eff.yaml frame
-(SPDConvGroup/C3k2Ghost/EMA/ECA/DySample/BiFPNCat all reused unchanged) with only two
-changes — a thinner P2 neck output and the LSCDetect shared head — so the only NEW class
-parse_model must learn about is LSCDetect.
+Builds on register_lwso(): the cfg/exp*.yaml architectures reuse SPDConvGroup/C3k2Ghost/
+EMA/ECA/DySample/BiFPNCat unchanged from models/lwso/modules.py, so the only NEW classes
+parse_model must learn about are LSCDetect, LSCDetectBN and C3k2Rep.
 
 Unlike the lwso/fap/star registrations (which extend base_modules/repeat_modules, i.e.
 the *block* channel-inference sets), a Detect-family head is special-cased in two other

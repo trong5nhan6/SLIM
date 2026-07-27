@@ -54,7 +54,7 @@ class SPDConvGroup(nn.Module):
     """SPDConv with a grouped fusion conv instead of dense: same lossless space-to-depth,
     but the post-rearrange conv only mixes within `groups` instead of across all 4*c1
     channels. A dense SPDConv fusion conv is the single largest compute driver in
-    lwso-yolo11n.yaml (measured: +38% GFLOPs vs a stock stride-2 Conv at the same spot,
+    the original lwso cfg (measured: +38% GFLOPs vs a stock stride-2 Conv at the same spot,
     because it runs a full conv over 4x the channels) -- grouping it recovers most of
     that cost without discarding the lossless rearrange. Falls back to fewer groups if
     4*c1 or c2 isn't evenly divisible by `groups`.

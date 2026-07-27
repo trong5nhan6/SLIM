@@ -1,0 +1,6 @@
+# EXP03 — Bilinear + C3k2Ghost (upsampler swap only)
+# Table 2, row 3. Isolates what dropping DySample costs. 0.550M / 6.18G.
+idea: slim
+model_cfg: cfg/exp03-b2b-yolo11n.yaml
+use_nwd: true
+name: exp03
