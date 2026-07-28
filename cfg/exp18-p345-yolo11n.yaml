@@ -1,0 +1,71 @@
+# EXP18 (Table 4, row 18) — EXP04 with the CONVENTIONAL P3/P4/P5 pyramid.
+#
+# Companion to EXP13. EXP13 answers "what if we just delete P2?" and lands on a two-scale
+# P3+P4 head, because this backbone has no stride-32 stage to fall back on. That is the
+# clean one-variable ablation, but a reviewer will object that it is not what "w/o P2"
+# means in the literature: every other small-object paper compares against the STANDARD
+# three-scale P3-P5 FPN. EXP18 is that comparison — the same Ours-N recipe re-targeted at
+# the pyramid YOLOv11 actually ships.
+#
+# Two things change vs EXP04 (this row deliberately moves both, because they are one
+# decision — "which three strides does the head run at"):
+#   * ADDED a P5/32 stage (SPDConvGroup 256 -> C3k2Rep 256); SPPF + C2PSA move from P4 to
+#     P5, which is where stock YOLOv11 puts them.
+#   * REMOVED the P2/4 rung of the neck (its upsample, BiFPNCat with backbone layer 2, the
+#     48ch output block and its ECA, plus the P2->P3 bottom-up rung).
+# Everything else is untouched: SPDConvGroup downsampling, EMA on P3, BiFPNCat fusion,
+# C3k2Rep blocks, LSCDetect(hidc=48), CIoU+NWD loss.
+#
+# The P2/4 backbone stem (layers 1-2) STAYS even though nothing detects at stride 4 — it is
+# how features reach P3, exactly as in stock YOLOv11.
+#
+# ECA moves from the P2 output to the P3 output: its job in EXP04 is cheap channel
+# re-weighting on the FINEST detection level, and here that level is P3.
+#
+# What to expect: this model is heavier than EXP04 despite losing the P2 head, because the
+# P5 stage is 256ch and the bottom-up P4->P5 rung is the widest conv in the graph — that is
+# the point. If mAP still falls, the argument is not merely "P2 helps", it is "P2 buys more
+# small-object accuracy per FLOP than P5 does". Report the PER-CLASS table (val.py prints
+# it) alongside EXP04 and EXP13: pedestrian / people / motor / bicycle are where a stride-4
+# level pays for itself, and P5 mostly serves classes VisDrone barely has.
+#
+# Run: python train.py --config configs/exp18.yaml
+
+nc: 10 # VisDrone classes
+
+scales: # [depth, width, max_channels]
+  n: [1.00, 1.00, 1024]
+
+backbone:
+  # [from, repeats, module, args]                    (shapes @ 960x960 input, n scale)
+  - [-1, 1, Conv, [16, 3, 2]] # 0  P1/2   16x480x480
+  - [-1, 1, SPDConvGroup, [32]] # 1  P2/4   32x240x240 (stem only — nothing detects here)
+  - [-1, 2, C3k2Rep, [64, False, 0.25]] # 2         64x240x240
+  - [-1, 1, SPDConvGroup, [64]] # 3  P3/8   64x120x120
+  - [-1, 2, C3k2Rep, [128, False, 0.25]] # 4        128x120x120
+  - [-1, 1, EMA, [128]] # 5         128x120x120
+  - [-1, 1, SPDConvGroup, [128]] # 6  P4/16  128x60x60
+  - [-1, 2, C3k2Rep, [128, True]] # 7               128x60x60
+  - [-1, 1, SPDConvGroup, [256]] # 8  P5/32  256x30x30   (new stage)
+  - [-1, 2, C3k2Rep, [256, True]] # 9               256x30x30
+  - [-1, 1, SPPF, [256, 5]] # 10              256x30x30   (moved P4 -> P5)
+  - [-1, 1, C2PSA, [256]] # 11              256x30x30   (moved P4 -> P5)
+
+head:
+  # top-down
+  - [-1, 1, nn.Upsample, [None, 2, "bilinear"]] # 12 P5 -> P4 size
+  - [[-1, 7], 1, BiFPNCat, [2]] # 13 256+128=384
+  - [-1, 1, C3k2Rep, [128, False]] # 14 P4 intermediate
+  - [-1, 1, nn.Upsample, [None, 2, "bilinear"]] # 15 P4 -> P3 size
+  - [[-1, 5], 1, BiFPNCat, [2]] # 16 128+128=256
+  - [-1, 1, C3k2Rep, [96, False]] # 17 P3/8 out
+  - [-1, 1, ECA, [96]] # 18 cheap channel attention on the finest level (was P2 in EXP04)
+  # bottom-up
+  - [-1, 1, SPDConvGroup, [128]] # 19 P3 -> P4 size
+  - [[-1, 14], 1, BiFPNCat, [2]] # 20 128+128=256
+  - [-1, 1, C3k2Rep, [128, True]] # 21 P4/16 out
+  - [-1, 1, SPDConvGroup, [256]] # 22 P4 -> P5 size
+  - [[-1, 11], 1, BiFPNCat, [2]] # 23 256+256=512
+  - [-1, 1, C3k2Rep, [256, True]] # 24 P5/32 out
+
+  - [[18, 21, 24], 1, LSCDetect, [nc, 48]] # 25 shared-conv GN head (P3, P4, P5), hidc=48

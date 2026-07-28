@@ -32,6 +32,18 @@ Repo này đã được gọt lại đúng phạm vi bài báo: **mỗi file con
 | 15 | `configs/exp15.yaml` | − attention (EMA+C2PSA+ECA) | 0.872M | 9.33 |
 | 16 | `configs/exp16.yaml` | − SPDConv (Conv stride-2) | 1.108M | 10.83 |
 | 17 | `configs/exp17.yaml` | head GroupNorm → BatchNorm | 0.938M | 9.83 |
+| 18 | `configs/exp18.yaml` | − P2, **+ P5** → pyramid P3/P4/P5 kiểu YOLO | 3.001M | 7.77 |
+
+Hai dòng 13 và 18 trả lời hai câu hỏi khác nhau về P2, đừng gộp làm một:
+
+* **13** = bỏ P2 và không thêm gì → head 2 scale P3+P4 (khung này vốn không có P5). Đây là
+  ablation đúng chuẩn "đổi một biến", đo riêng chi phí/đóng góp của nhánh stride-4.
+* **18** = bỏ P2 **và** thêm lại tầng stride-32 → pyramid P3/P4/P5 giống hệt YOLOv11 ships.
+  Đây là mốc reviewer sẽ đòi: "w/o P2" trong literature nghĩa là FPN ba tầng tiêu chuẩn,
+  không phải head hai tầng. Kết quả đo: 3.001M / 7.77G — **nặng gấp 3.2× Ours-N dù đã bỏ
+  P2**, vì tầng P5 rộng 256ch và rung bottom-up P4→P5 là conv to nhất đồ thị. Nếu mAP vẫn
+  giảm thì luận điểm mạnh hơn hẳn: không chỉ "P2 có ích" mà là "P2 đổi được nhiều mAP
+  small-object trên mỗi FLOP hơn P5".
 
 Số ở trên là bản **chưa fuse**, đo bằng `ultralytics.utils.torch_utils.get_flops` @640.
 `tests/test_modules.py` regression-guard đúng những con số này (sai lệch >2% là fail).

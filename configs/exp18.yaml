@@ -1,0 +1,7 @@
+# EXP18 — EXP04 với pyramid P3/P4/P5 kiểu YOLO (bỏ P2, thêm lại tầng stride-32)
+# Bảng 4, dòng 18. 2.851M / 7.27G — nặng gấp 3.2x Ours-N dù đã bỏ P2, vì tầng P5 rộng 256ch.
+# Bổ sung cho exp13 (bỏ P2 mà không thêm P5 -> head 2 scale P3+P4).
+idea: slim
+model_cfg: cfg/exp18-p345-yolo11n.yaml
+use_nwd: true
+name: exp18

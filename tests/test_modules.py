@@ -244,6 +244,8 @@ def test_slim_fuse_preserves_groupnorm_head():
         ("cfg/exp15-noattn-yolo11n.yaml", "slim", [4, 8, 16], 0.872),
         ("cfg/exp16-nospd-yolo11n.yaml", "slim", [4, 8, 16], 1.108),
         ("cfg/exp17-bnhead-yolo11n.yaml", "slim", [4, 8, 16], 0.938),
+        # P2 removed AND a P5/32 stage added -> the conventional YOLO pyramid
+        ("cfg/exp18-p345-yolo11n.yaml", "slim", [8, 16, 32], 3.001),
     ],
 )
 def test_model_builds_and_forwards(cfg, register_fn, expected_strides, params_m):

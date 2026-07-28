@@ -30,6 +30,7 @@ Mỗi config ứng với ĐÚNG một dòng trong results/SOTA-SLIM.xlsx:
       configs/exp15.yaml   - attention (EMA+C2PSA+ECA)      0.827M / 8.77G
       configs/exp16.yaml   - SPDConv (Conv stride-2)        1.063M / 10.26G
       configs/exp17.yaml   head GroupNorm -> BatchNorm      0.893M / 9.23G
+      configs/exp18.yaml   - P2 + P5 = pyramid P3/P4/P5     2.851M / 7.27G
 
 (params/GFLOPs ở trên là bản CHƯA fuse, đo @640 — xem tests/test_modules.py, nơi
 regression-guard đúng những con số này.)
