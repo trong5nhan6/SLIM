@@ -1,0 +1,6 @@
+# EXP19 — EXP04 + tầng P5 -> pyramid bốn tầng P2/P3/P4/P5 (trả lời Reviewer 1, ý 1)
+# Bảng III, dòng "+ P5". Cùng recipe với exp04/exp13/exp18.
+idea: slim
+model_cfg: cfg/exp19-p2345-yolo11n.yaml
+use_nwd: true
+name: exp19

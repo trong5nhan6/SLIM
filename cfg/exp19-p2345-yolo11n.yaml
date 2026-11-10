@@ -1,0 +1,56 @@
+# EXP19 (Table III, P2-P5 row) — EXP04 + a P5/32 stage = four-level P2/P3/P4/P5 pyramid.
+#
+# Answers Reviewer 1, weak aspect 1: "a P2-P5 alternative is needed". EXP18 SWAPS P2 for P5;
+# this row ADDS P5 on top of the full SLIM-N, so the marginal value of the stride-32 level
+# is measured with P2 already present (the configuration most small-object papers ship).
+#
+# = union of EXP04 and EXP18: backbone of EXP18 (P5 stage, SPPF + C2PSA at P5), the SLIM-N
+# P2 rung (48ch + ECA), bottom-up continues P4 -> P5. Same SPDConvGroup / EMA / BiFPNCat /
+# C3k2Rep / LSCDetect(hidc=48) / CIoU+NWD recipe; only the extra level differs from EXP04.
+#
+# Run: python train.py --config configs/exp19.yaml
+
+nc: 10 # VisDrone classes
+
+scales: # [depth, width, max_channels]
+  n: [1.00, 1.00, 1024]
+
+backbone:
+  # [from, repeats, module, args]                    (shapes @ 960x960 input, n scale)
+  - [-1, 1, Conv, [16, 3, 2]] # 0  P1/2   16x480x480
+  - [-1, 1, SPDConvGroup, [32]] # 1  P2/4   32x240x240 
+  - [-1, 2, C3k2Rep, [64, False, 0.25]] # 2         64x240x240
+  - [-1, 1, SPDConvGroup, [64]] # 3  P3/8   64x120x120
+  - [-1, 2, C3k2Rep, [128, False, 0.25]] # 4        128x120x120
+  - [-1, 1, EMA, [128]] # 5         128x120x120
+  - [-1, 1, SPDConvGroup, [128]] # 6  P4/16  128x60x60
+  - [-1, 2, C3k2Rep, [128, True]] # 7               128x60x60
+  - [-1, 1, SPDConvGroup, [256]] # 8  P5/32  256x30x30   (new stage)
+  - [-1, 2, C3k2Rep, [256, True]] # 9               256x30x30
+  - [-1, 1, SPPF, [256, 5]] # 10              256x30x30   (moved P4 -> P5)
+  - [-1, 1, C2PSA, [256]] # 11              256x30x30   (moved P4 -> P5)
+
+head:
+  # top-down
+  - [-1, 1, nn.Upsample, [None, 2, "bilinear"]] # 12 P5 -> P4 size
+  - [[-1, 7], 1, BiFPNCat, [2]] # 13 256+128=384
+  - [-1, 1, C3k2Rep, [128, False]] # 14 P4 intermediate
+  - [-1, 1, nn.Upsample, [None, 2, "bilinear"]] # 15 P4 -> P3 size
+  - [[-1, 5], 1, BiFPNCat, [2]] # 16 128+128=256
+  - [-1, 1, C3k2Rep, [96, False]] # 17 P3 intermediate
+  - [-1, 1, nn.Upsample, [None, 2, "bilinear"]] # 18 P3 -> P2 size
+  - [[-1, 2], 1, BiFPNCat, [2]] # 19 96+64=160
+  - [-1, 1, C3k2Rep, [48, False]] # 20 P2/4 out
+  - [-1, 1, ECA, [48]] # 21 ECA on P2, as in EXP04
+  # bottom-up
+  - [-1, 1, SPDConvGroup, [96]] # 22 P2 -> P3 size
+  - [[-1, 17], 1, BiFPNCat, [2]] # 23 96+96=192
+  - [-1, 1, C3k2Rep, [96, False]] # 24 P3/8 out
+  - [-1, 1, SPDConvGroup, [128]] # 25 P3 -> P4 size
+  - [[-1, 14], 1, BiFPNCat, [2]] # 26 128+128=256
+  - [-1, 1, C3k2Rep, [128, True]] # 27 P4/16 out
+  - [-1, 1, SPDConvGroup, [256]] # 28 P4 -> P5 size
+  - [[-1, 11], 1, BiFPNCat, [2]] # 29 256+256=512
+  - [-1, 1, C3k2Rep, [256, True]] # 30 P5/32 out
+
+  - [[21, 24, 27, 30], 1, LSCDetect, [nc, 48]] # 31 shared-conv GN head (P2-P5), hidc=48
